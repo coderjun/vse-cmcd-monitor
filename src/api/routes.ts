@@ -4,6 +4,10 @@ import { getLogProcessor } from '../utils/logProcessor';
 import { updateConfig } from '../models/anomalyDetector';
 import { logger } from '../utils/logger';
 import { generateTestData } from './testGenerator';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 export function setupRoutes(app: express.Application): void {
   /**
@@ -26,7 +30,17 @@ export function setupRoutes(app: express.Application): void {
         { path: '/api/config', method: 'GET', description: 'Get current anomaly detection configuration' },
         { path: '/api/config', method: 'PUT', description: 'Update anomaly detection configuration' },
         { path: '/api/test/generate', method: 'POST', description: 'Generate test data' },
+        { path: '/api/player/config', method: 'GET', description: 'Get player configuration' },
       ]
+    });
+  });
+  
+  /**
+   * Get player configuration
+   */
+  app.get('/api/player/config', (req: Request, res: Response) => {
+    res.status(200).json({
+      defaultStreamUrl: process.env.DEFAULT_STREAM_URL || 'https://storage.googleapis.com/shaka-demo-assets/angel-one-hls/hls.m3u8'
     });
   });
 
