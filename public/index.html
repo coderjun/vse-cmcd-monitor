@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Video Streaming Anomaly Detector</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      padding-top: 20px;
+    }
+    .anomaly-card {
+      margin-bottom: 15px;
+      border-left: 5px solid #ccc;
+      transition: all 0.3s ease;
+    }
+    .severity-low { border-left-color: #28a745; }
+    .severity-medium { border-left-color: #ffc107; }
+    .severity-high { border-left-color: #fd7e14; }
+    .severity-critical { border-left-color: #dc3545; }
+    
+    .anomaly-card.new-anomaly {
+      animation: highlight 2s ease;
+    }
+    
+    @keyframes highlight {
+      0% { background-color: rgba(255, 243, 205, 1); }
+      100% { background-color: rgba(255, 243, 205, 0); }
+    }
+    
+    #monitoring-status {
+      font-size: 0.9rem;
+      padding: 0.25rem 0.5rem;
+    }
+    
+    .log-entry {
+      font-family: monospace;
+      font-size: 0.8rem;
+      padding: 0.5rem;
+      background-color: #f8f9fa;
+      border-radius: 0.25rem;
+      margin-bottom: 0.5rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="row mb-4">
+      <div class="col">
+        <h1 class="display-5">Video Streaming Anomaly Detector</h1>
+        <p class="lead">Real-time detection of streaming issues and quality degradation</p>
+      </div>
+    </div>
+    
+    <div class="row mb-4">
+      <div class="col-md-8">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Live Anomalies</h5>
+            <span id="monitoring-status" class="badge bg-success">Monitoring</span>
+          </div>
+          <div class="card-body">
+            <div id="anomalies-container">
+              <div class="text-center text-muted py-5">
+                <p>No anomalies detected yet</p>
+                <p>Waiting for streaming data...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="col-md-4">
+        <div class="card">
+          <div class="card-header">
+            <h5 class="mb-0">Statistics</h5>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              <div class="col-6">
+                <div class="card bg-light mb-3">
+                  <div class="card-body text-center">
+                    <h6 class="card-title">Active Sessions</h6>
+                    <p id="active-sessions" class="display-6 mb-0">0</p>
+                  </div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="card bg-light mb-3">
+                  <div class="card-body text-center">
+                    <h6 class="card-title">Total Anomalies</h6>
+                    <p id="total-anomalies" class="display-6 mb-0">0</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="mt-3">
+              <h6>Anomalies by Type</h6>
+              <div id="anomalies-by-type">
+                <div class="text-muted">No data yet</div>
+              </div>
+            </div>
+            
+            <div class="mt-3">
+              <h6>Anomalies by Severity</h6>
+              <div class="progress" style="height: 25px;">
+                <div id="severity-low" class="progress-bar bg-success" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">Low: 0</div>
+                <div id="severity-medium" class="progress-bar bg-warning" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">Medium: 0</div>
+                <div id="severity-high" class="progress-bar bg-orange" role="progressbar" style="width: 0%; background-color: #fd7e14;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">High: 0</div>
+                <div id="severity-critical" class="progress-bar bg-danger" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">Critical: 0</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="card mt-4">
+          <div class="card-header">
+            <h5 class="mb-0">Test Tools</h5>
+          </div>
+          <div class="card-body">
+            <button id="generate-test-data" class="btn btn-primary mb-2 w-100">Generate Test Data</button>
+            <button id="clear-anomalies" class="btn btn-outline-secondary w-100">Clear All Anomalies</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="row">
+      <div class="col">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Log Submission</h5>
+          </div>
+          <div class="card-body">
+            <div class="mb-3">
+              <label for="cmcd-log" class="form-label">CMCD Log Entry (JSON)</label>
+              <textarea id="cmcd-log" class="form-control" rows="5" placeholder='{"sid": "12345", "br": 3000, "bl": 5000, ...}'></textarea>
+            </div>
+            <button id="submit-log" class="btn btn-primary">Submit Log</button>
+            <div id="submit-result" class="mt-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    // Connect to Socket.io
+    const socket = io();
+    
+    // UI elements
+    const anomaliesContainer = document.getElementById('anomalies-container');
+    const monitoringStatus = document.getElementById('monitoring-status');
+    const activeSessions = document.getElementById('active-sessions');
+    const totalAnomalies = document.getElementById('total-anomalies');
+    const anomaliesByType = document.getElementById('anomalies-by-type');
+    const severityLow = document.getElementById('severity-low');
+    const severityMedium = document.getElementById('severity-medium');
+    const severityHigh = document.getElementById('severity-high');
+    const severityCritical = document.getElementById('severity-critical');
+    const generateTestBtn = document.getElementById('generate-test-data');
+    const clearAnomaliesBtn = document.getElementById('clear-anomalies');
+    const cmcdLogTextarea = document.getElementById('cmcd-log');
+    const submitLogBtn = document.getElementById('submit-log');
+    const submitResult = document.getElementById('submit-result');
+    
+    // Statistics
+    let stats = {
+      activeSessions: 0,
+      totalAnomalies: 0,
+      byType: {},
+      bySeverity: {
+        low: 0,
+        medium: 0,
+        high: 0,
+        critical: 0
+      }
+    };
+    
+    // Store anomalies
+    const anomalies = new Map();
+    
+    // Socket.io event handling
+    socket.on('connect', () => {
+      monitoringStatus.textContent = 'Connected';
+      monitoringStatus.classList.remove('bg-danger', 'bg-warning');
+      monitoringStatus.classList.add('bg-success');
+    });
+    
+    socket.on('disconnect', () => {
+      monitoringStatus.textContent = 'Disconnected';
+      monitoringStatus.classList.remove('bg-success', 'bg-warning');
+      monitoringStatus.classList.add('bg-danger');
+    });
+    
+    socket.on('connecting', () => {
+      monitoringStatus.textContent = 'Connecting...';
+      monitoringStatus.classList.remove('bg-success', 'bg-danger');
+      monitoringStatus.classList.add('bg-warning');
+    });
+    
+    socket.on('anomalies', (newAnomalies) => {
+      if (newAnomalies && newAnomalies.length > 0) {
+        newAnomalies.forEach(anomaly => {
+          // Add to our collection
+          anomalies.set(anomaly.id, anomaly);
+          
+          // Update statistics
+          stats.totalAnomalies++;
+          
+          // By type
+          stats.byType[anomaly.type] = (stats.byType[anomaly.type] || 0) + 1;
+          
+          // By severity
+          stats.bySeverity[anomaly.severity]++;
+          
+          // Track unique sessions
+          const sessionId = anomaly.context.sessionId;
+          if (sessionId && !trackedSessions.has(sessionId)) {
+            trackedSessions.add(sessionId);
+            stats.activeSessions = trackedSessions.size;
+          }
+        });
+        
+        // Update UI
+        updateAnomaliesDisplay();
+        updateStatsDisplay();
+      }
+    });
+    
+    // Track unique sessions
+    const trackedSessions = new Set();
+    
+    // Update anomalies display
+    function updateAnomaliesDisplay() {
+      // Clear the container if it has the placeholder
+      if (anomaliesContainer.querySelector('.text-muted')) {
+        anomaliesContainer.innerHTML = '';
+      }
+      
+      // Get all anomalies, sorted by timestamp (newest first)
+      const sortedAnomalies = Array.from(anomalies.values())
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      
+      // Only show the last 20 for performance
+      const recentAnomalies = sortedAnomalies.slice(0, 20);
+      
+      // Create HTML for each anomaly
+      anomaliesContainer.innerHTML = recentAnomalies.map(anomaly => {
+        const timestamp = new Date(anomaly.timestamp).toLocaleTimeString();
+        const typeFormatted = anomaly.type.replace(/_/g, ' ').toLowerCase();
+        
+        return `
+        <div class="card anomaly-card severity-${anomaly.severity} new-anomaly" data-id="${anomaly.id}">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <h5 class="card-title mb-0">${anomaly.message}</h5>
+              <span class="badge bg-secondary">${timestamp}</span>
+            </div>
+            <h6 class="card-subtitle mb-2 text-muted">
+              Type: ${typeFormatted} | Severity: ${anomaly.severity} | Session: ${anomaly.context.sessionId || 'Unknown'}
+            </h6>
+            <p class="card-text">${anomaly.recommendation || ''}</p>
+            <div class="mt-2">
+              <button class="btn btn-sm btn-outline-secondary details-btn" data-id="${anomaly.id}">
+                Details
+              </button>
+            </div>
+            <div class="anomaly-details mt-2 d-none" id="details-${anomaly.id}">
+              <hr>
+              <h6>Affected Metrics:</h6>
+              <p>${anomaly.affectedMetrics.join(', ')}</p>
+              <h6>Context:</h6>
+              <pre class="context-data">${JSON.stringify(anomaly.context, null, 2)}</pre>
+            </div>
+          </div>
+        </div>
+        `;
+      }).join('') || `
+        <div class="text-center text-muted py-5">
+          <p>No anomalies detected yet</p>
+          <p>Waiting for streaming data...</p>
+        </div>
+      `;
+      
+      // Add event listeners for details buttons
+      document.querySelectorAll('.details-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-id');
+          const detailsElem = document.getElementById(`details-${id}`);
+          detailsElem.classList.toggle('d-none');
+        });
+      });
+      
+      // Remove 'new-anomaly' class after animation
+      setTimeout(() => {
+        document.querySelectorAll('.new-anomaly').forEach(elem => {
+          elem.classList.remove('new-anomaly');
+        });
+      }, 2000);
+    }
+    
+    // Update statistics display
+    function updateStatsDisplay() {
+      activeSessions.textContent = stats.activeSessions;
+      totalAnomalies.textContent = stats.totalAnomalies;
+      
+      // Update type breakdown
+      const typeHTML = Object.entries(stats.byType).map(([type, count]) => {
+        const typeFormatted = type.replace(/_/g, ' ').toLowerCase();
+        return `<div>${typeFormatted}: ${count}</div>`;
+      }).join('') || '<div class="text-muted">No data yet</div>';
+      
+      anomaliesByType.innerHTML = typeHTML;
+      
+      // Update severity bars
+      const total = Object.values(stats.bySeverity).reduce((sum, val) => sum + val, 0);
+      if (total > 0) {
+        const updateBar = (element, severity) => {
+          const count = stats.bySeverity[severity];
+          const percent = Math.round((count / total) * 100);
+          element.style.width = `${percent || 0}%`;
+          element.setAttribute('aria-valuenow', percent);
+          element.textContent = `${severity.charAt(0).toUpperCase() + severity.slice(1)}: ${count}`;
+        };
+        
+        updateBar(severityLow, 'low');
+        updateBar(severityMedium, 'medium');
+        updateBar(severityHigh, 'high');
+        updateBar(severityCritical, 'critical');
+      }
+    }
+    
+    // Generate test data
+    generateTestBtn.addEventListener('click', () => {
+      fetch('/api/test/generate', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+          console.log('Generated test data:', data);
+        })
+        .catch(error => console.error('Error generating test data:', error));
+    });
+    
+    // Clear anomalies
+    clearAnomaliesBtn.addEventListener('click', () => {
+      anomalies.clear();
+      stats = {
+        activeSessions: stats.activeSessions,
+        totalAnomalies: 0,
+        byType: {},
+        bySeverity: {
+          low: 0,
+          medium: 0,
+          high: 0,
+          critical: 0
+        }
+      };
+      updateAnomaliesDisplay();
+      updateStatsDisplay();
+    });
+    
+    // Submit log manually
+    submitLogBtn.addEventListener('click', () => {
+      try {
+        const logData = JSON.parse(cmcdLogTextarea.value);
+        
+        fetch('/api/logs', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(logData)
+        })
+        .then(response => response.json())
+        .then(data => {
+          submitResult.innerHTML = `<div class="alert alert-success">Log submitted successfully!</div>`;
+          setTimeout(() => {
+            submitResult.innerHTML = '';
+          }, 3000);
+        })
+        .catch(error => {
+          submitResult.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        });
+      } catch (e) {
+        submitResult.innerHTML = `<div class="alert alert-danger">Invalid JSON: ${e.message}</div>`;
+      }
+    });
+    
+    // Sample CMCD log
+    cmcdLogTextarea.value = JSON.stringify({
+      timestamp: new Date().toISOString(),
+      sid: "test-session-" + Math.floor(Math.random() * 1000),
+      cid: "content-123",
+      br: 3000,
+      bl: 5000,
+      d: 4000,
+      mtp: 5000,
+      bs: false,
+      sf: "d", 
+      st: "v",
+      playerState: "playing"
+    }, null, 2);
+  </script>
+</body>
+</html>
