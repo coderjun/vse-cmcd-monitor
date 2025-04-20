@@ -32,9 +32,14 @@ export interface CMCDLogEntry {
   
   // Extended fields for analysis (not part of CMCD spec but useful for analysis)
   resolution?: string;        // Video resolution (e.g., "1920x1080")
-  playerState?: 'playing' | 'paused' | 'buffering' | 'ended';
+  playerState?: 'initialized' | 'playing' | 'paused' | 'buffering' | 'seeking' | 'ended' | 'error';
   errorCode?: string;         // Any error code reported
   latency?: number;           // Network latency in ms
+  firstConnect?: boolean;     // Flag for initial connection
+  forceDetection?: boolean;   // Flag to force anomaly detection (for testing)
+  isSimulation?: boolean;     // Flag to indicate this is simulation data
+  oneTimeOnly?: boolean;      // Flag to indicate this is a one-time event
+  anomalyType?: string;       // Hint for what type of anomaly to generate
   
   // Raw headers/data for additional processing
   rawData?: Record<string, any>;

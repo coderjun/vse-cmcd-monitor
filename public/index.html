@@ -175,7 +175,20 @@
           </div>
           <div class="card-body">
             <button id="generate-test-data" class="btn btn-primary mb-2 w-100">Generate Test Data</button>
-            <button id="clear-anomalies" class="btn btn-outline-secondary w-100">Clear All Anomalies</button>
+            <button id="simulate-quality-drop" class="btn btn-warning mb-2 w-100">Simulate Quality Drop</button>
+            <button id="force-anomaly" class="btn btn-danger mb-2 w-100">Force Anomaly</button>
+            <button id="clear-anomalies" class="btn btn-outline-secondary mb-3 w-100">Clear All Anomalies</button>
+            
+            <div class="form-group mt-2">
+              <label for="log-level-select">Console Log Level:</label>
+              <select id="log-level-select" class="form-select form-select-sm">
+                <option value="0">Errors Only</option>
+                <option value="1" selected>Warnings & Errors</option>
+                <option value="2">Info & Above</option>
+                <option value="3">Debug & Above</option>
+                <option value="4">All Logs (Trace)</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>
@@ -203,9 +216,60 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script>
+    // Improved logging utility to control verbosity 
+    const Logger = {
+      // Log levels: 0 = error, 1 = warn, 2 = info, 3 = debug, 4 = trace
+      level: 1, // Default to warnings and errors only
+      
+      // Using more explicit threshold checks
+      error: function(...args) {
+        // Error messages always show regardless of level
+        console.error('[ERROR]', ...args);
+      },
+      
+      warn: function(...args) {
+        if (this.level >= 1) {
+          console.warn('[WARN]', ...args);
+        }
+      },
+      
+      info: function(...args) {
+        if (this.level >= 2) {
+          console.info('[INFO]', ...args);
+        }
+      },
+      
+      debug: function(...args) {
+        if (this.level >= 3) {
+          console.debug('[DEBUG]', ...args);
+        }
+      },
+      
+      trace: function(...args) {
+        if (this.level >= 4) {
+          console.log('[TRACE]', ...args);
+        }
+      },
+      
+      // Set the logging level
+      setLevel: function(level) {
+        // Store the old level
+        const oldLevel = this.level;
+        // Update to the new level
+        this.level = level;
+        
+        // Always output this message regardless of level
+        console.log(`[LOGGER] Log level changed from ${oldLevel} to ${level}`);
+        
+        // Prefix levels for clarity
+        const levelNames = ['ERROR only', 'WARN+', 'INFO+', 'DEBUG+', 'All (TRACE+)'];
+        console.log(`[LOGGER] Log level is now ${levelNames[level]}`);
+      }
+    };
+    
     // Check if Shaka Player is supported
     if (!shaka.Player.isBrowserSupported()) {
-      console.error('Shaka Player is not supported in this browser.');
+      Logger.error('Shaka Player is not supported in this browser.');
     }
     
     // Connect to Socket.io
@@ -221,6 +285,7 @@
     let loadUrlButton = document.getElementById('load-url');
     let cmcdEnabledCheckbox = document.getElementById('cmcd-enabled');
     let playerStats = document.getElementById('player-stats');
+    let logLevelSelect = document.getElementById('log-level-select');
     let defaultStreamUrl = '';
     let statsUpdateInterval = null;
     
@@ -235,6 +300,8 @@
     const severityHigh = document.getElementById('severity-high');
     const severityCritical = document.getElementById('severity-critical');
     const generateTestBtn = document.getElementById('generate-test-data');
+    const simulateQualityDropBtn = document.getElementById('simulate-quality-drop');
+    const forceAnomalyBtn = document.getElementById('force-anomaly');
     const clearAnomaliesBtn = document.getElementById('clear-anomalies');
     const cmcdLogTextarea = document.getElementById('cmcd-log');
     const submitLogBtn = document.getElementById('submit-log');
@@ -258,6 +325,9 @@
       // Add error event listener
       player.addEventListener('error', onPlayerError);
       
+      // Send initial "initialized" data
+      sendCMCDData('initialized', { firstConnect: true });
+      
       // Add stats update listener
       videoElement.addEventListener('playing', startStatsUpdate);
       videoElement.addEventListener('pause', function() {
@@ -267,11 +337,124 @@
         sendCMCDData('seeking');
       });
       videoElement.addEventListener('stalled', function() {
-        sendCMCDData('buffering');
+        // When stalled, we'll report buffering and buffer starvation
+        sendCMCDData('buffering', { bs: true, bl: 0 });
       });
       videoElement.addEventListener('ended', function() {
+        // Send a single 'ended' event
         sendCMCDData('ended');
+        
+        // Clear any ongoing stats update interval to prevent further data being sent
+        if (statsUpdateInterval) {
+          Logger.info('Video ended, clearing stats update interval');
+          clearInterval(statsUpdateInterval);
+          statsUpdateInterval = null;
+        }
       });
+      
+      // Custom function to simulate a quality degradation (for testing)
+      // Make simulation state tracking global
+      window.isSimulating = false;
+      window.simulationTimeouts = [];
+      window.simulationIntervals = [];
+      window.simulationCount = 0;
+
+      window.simulateQualityDrop = function(buttonElement) {
+        if (!player) return;
+        
+        // Don't start if already simulating
+        if (window.isSimulating) {
+          Logger.warn('Already simulating, ignoring request');
+          return;
+        }
+        
+        // Forcefully pause any existing stats update
+        if (statsUpdateInterval) {
+          Logger.debug('Pausing stats update interval during simulation');
+          clearInterval(statsUpdateInterval);
+          statsUpdateInterval = null;
+        }
+        
+        Logger.info('Starting quality degradation simulation');
+        window.isSimulating = true;
+        window.simulationCount = 0; // Reset counter
+        
+        // Disable button if provided
+        if (buttonElement) {
+          buttonElement.disabled = true;
+          buttonElement.textContent = 'Simulating...';
+        }
+        
+        // Send a sequence of data points to force anomaly detection
+        const simulateSequence = [
+          // High quality
+          { br: 6000, mtp: 8000, bs: false, bl: 5000, pr: 1, d: 4000, isSimulation: true, oneTimeOnly: true },
+          // Significant drop
+          { br: 1500, mtp: 1600, bs: false, bl: 2000, pr: 1, d: 4000, isSimulation: true, oneTimeOnly: true },
+          // Even lower
+          { br: 800, mtp: 900, bs: false, bl: 1000, pr: 1, d: 4000, isSimulation: true, oneTimeOnly: true },
+          // Buffer starvation
+          { br: 500, mtp: 600, bs: true, bl: 0, pr: 0, d: 4000, forceDetection: true, isSimulation: true, oneTimeOnly: true }
+        ];
+        
+        // Cleanup function to stop all simulation activity
+        function stopSimulation() {
+          // Clear timeouts
+          if (window.simulationTimeouts && window.simulationTimeouts.length > 0) {
+            Logger.debug(`Clearing ${window.simulationTimeouts.length} simulation timeouts`);
+            window.simulationTimeouts.forEach(timeout => clearTimeout(timeout));
+            window.simulationTimeouts = [];
+          }
+          
+          // Clear intervals
+          if (window.simulationIntervals && window.simulationIntervals.length > 0) {
+            Logger.debug(`Clearing ${window.simulationIntervals.length} simulation intervals`);
+            window.simulationIntervals.forEach(interval => clearInterval(interval));
+            window.simulationIntervals = [];
+          }
+          
+          // Reset state
+          window.isSimulating = false;
+          
+          // Restart stats updates if needed
+          if (!statsUpdateInterval && !videoElement.paused) {
+            Logger.debug('Restarting stats update interval after simulation');
+            statsUpdateInterval = setInterval(updateStats, 2000);
+          }
+          
+          // Re-enable button
+          if (buttonElement) {
+            buttonElement.disabled = false;
+            buttonElement.textContent = 'Simulate Quality Drop';
+          }
+          
+          Logger.info(`Simulation complete and cleaned up. Sent ${window.simulationCount} data points`);
+        }
+        
+        // Clear existing simulation state
+        stopSimulation();
+        window.isSimulating = true; // Reset state flag
+        window.simulationTimeouts = [];
+        
+        // Send data points once with increasing delays
+        simulateSequence.forEach((data, index) => {
+          const timeout = setTimeout(() => {
+            if (!window.isSimulating) return; // Skip if simulation was stopped
+            
+            Logger.debug(`Sending simulated data point ${index + 1}:`, data);
+            sendCMCDData('playing', data);
+            window.simulationCount++; // Track number of data points sent
+            
+            // Stop simulation after sending last point
+            if (index === simulateSequence.length - 1) {
+              Logger.info(`Finished sending ${simulateSequence.length} simulation data points`);
+              setTimeout(stopSimulation, 1000);
+            }
+          }, index * 1000);
+          
+          window.simulationTimeouts.push(timeout);
+        });
+      };
       
       // Fetch the default stream URL from the server
       try {
@@ -302,65 +485,231 @@
         clearInterval(statsUpdateInterval);
       }
       
-      // Send initial playing state
-      sendCMCDData('playing');
+      // Send initial playing state (only if not simulating)
+      if (!window.isSimulating) {
+        sendCMCDData('playing');
+      } else {
+        console.log('Skipping initial playing state during simulation');
+      }
       
-      // Update stats every 2 seconds while playing
+      // Store the interval ID so we can pause during simulations
       statsUpdateInterval = setInterval(updateStats, 2000);
+      
+      // Add this interval to simulation intervals to ensure it's paused during simulation
+      if (window.simulationIntervals) {
+        window.simulationIntervals.push(statsUpdateInterval);
+      }
     }
     
     // Update player statistics
     function updateStats() {
-      if (!player || videoElement.paused) return;
+      // Don't send updates if player doesn't exist
+      if (!player) return;
+      
+      // Skip updates during simulation
+      if (window.isSimulating) {
+        Logger.debug('Skipping automatic stats update during simulation');
+        return;
+      }
+      
+      // Check if video has ended and don't send updates
+      if (videoElement.ended) {
+        Logger.debug('Video has ended, skipping CMCD data updates');
+        return;
+      }
       
       const stats = player.getStats();
       const variantTrack = player.getVariantTracks().find(track => track.active);
       const resolution = variantTrack ? `${variantTrack.width}x${variantTrack.height}` : 'Unknown';
       
-      // Update UI with player stats
+      // Add detailed player state
+      const playerStateText = videoElement.paused ? 'Paused' : 'Playing';
+      const readyStateText = [
+        'HAVE_NOTHING (0): No information available',
+        'HAVE_METADATA (1): Metadata loaded',
+        'HAVE_CURRENT_DATA (2): Current frame loaded',
+        'HAVE_FUTURE_DATA (3): Next frame loaded',
+        'HAVE_ENOUGH_DATA (4): Enough data loaded'
+      ][videoElement.readyState];
+      
+      // Update UI with enhanced player stats
       playerStats.innerHTML = `
+        <div>Player State: ${playerStateText}</div>
+        <div>Ready State: ${readyStateText}</div>
         <div>Resolution: ${resolution}</div>
         <div>Bandwidth: ${Math.round(stats.estimatedBandwidth / 1000)} kbps</div>
         <div>Buffer: ${Math.round(stats.bufferingTime * 1000)} ms</div>
+        <div>Duration: ${videoElement.duration ? videoElement.duration.toFixed(2) : 'N/A'} seconds</div>
+        <div>Current Time: ${videoElement.currentTime.toFixed(2)} seconds</div>
+        <div>Buffered: ${videoElement.buffered.length ? videoElement.buffered.end(0).toFixed(2) : '0'} seconds</div>
         <div>Playback Rate: ${videoElement.playbackRate}</div>
         <div>Session ID: ${sessionId}</div>
       `;
       
-      // Send CMCD data to the server
-      sendCMCDData('playing');
+      // Send CMCD data to the server (only if not simulating)
+      sendCMCDData(videoElement.paused ? 'paused' : 'playing');
     }
     
     // Send CMCD data to server
     function sendCMCDData(playerState, additionalData = {}) {
-      if (!cmcdEnabledCheckbox.checked) return;
+      // Check if we're sending outside of simulation mode
+      const isManualSimulation = additionalData && additionalData.isSimulation === true;
       
-      const stats = player ? player.getStats() : {};
-      const variantTrack = player ? player.getVariantTracks().find(track => track.active) : null;
+      if (window.isSimulating && !isManualSimulation) {
+        Logger.debug(`CMCD sending blocked: Simulation in progress, blocking state "${playerState}"`);
+        return;
+      }
       
-      const cmcdData = {
+      Logger.debug(`Attempting to send CMCD data for state: ${playerState}`);
+      
+      if (!cmcdEnabledCheckbox.checked) {
+        Logger.debug('CMCD sending blocked: CMCD is disabled in checkbox');
+        return;
+      }
+      
+      if (!player) {
+        Logger.debug('CMCD sending blocked: Player is not initialized');
+        return;
+      }
+      
+      // Special cases for these states - they should always be sent
+      const alwaysSendStates = ['initialized', 'error', 'page_loaded'];
+      const isSpecialState = alwaysSendStates.includes(playerState);
+      const isSimulation = additionalData.isSimulation === true;
+      
+      // For special state 'ended', we want to send it regardless of video state
+      const isEndedState = playerState === 'ended';
+      
+      // For normal playback states, check if video is ready with basic checks
+      // The src property often doesn't reflect the actual loaded video in adaptive streaming
+      // So just check if there's a valid readyState and either duration or currentTime > 0
+      const isVideoReady = (isEndedState || (videoElement.readyState > 0 && 
+                         (videoElement.duration > 0 || videoElement.currentTime > 0)));
+      
+      // Log detailed video state for debugging
+      Logger.debug(`Video state check: src=${!!videoElement.src}, readyState=${videoElement.readyState}, duration=${videoElement.duration}, currentTime=${videoElement.currentTime}, buffered=${videoElement.buffered ? videoElement.buffered.length : 0}, paused=${videoElement.paused}, isVideoReady=${isVideoReady}`);
+      
+      // Create CMCD data with different detail levels based on state
+      let cmcdData = {
         timestamp: new Date().toISOString(),
         sid: sessionId,
         cid: 'video-stream-1',
-        br: variantTrack ? Math.round(variantTrack.bandwidth / 1000) : undefined,
-        bl: videoElement.buffered.length ? Math.round(videoElement.buffered.end(videoElement.buffered.length - 1) - videoElement.currentTime) * 1000 : 0,
-        d: variantTrack && variantTrack.bandwidth ? Math.round(4000000 / variantTrack.bandwidth * 1000) : undefined,
-        mtp: stats.estimatedBandwidth ? Math.round(stats.estimatedBandwidth / 1000) : undefined,
-        bs: playerState === 'buffering',
-        sf: 'h', // HLS
-        st: 'v', // VOD
-        playerState: playerState,
-        resolution: variantTrack ? `${variantTrack.width}x${variantTrack.height}` : undefined,
-        ...additionalData
+        playerState: playerState
       };
       
-      // Send to server
-      fetch('/api/logs', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(cmcdData)
-      }).catch(error => console.error('Error sending CMCD data:', error));
+      // Bypass checks for simulations or special states or active video
+      if (isVideoReady || isSpecialState || isSimulation) {
+        // Include data from additionalData for all states
+        Object.assign(cmcdData, additionalData);
+        
+        // For states with active video, add detailed metrics
+        if (isVideoReady) {
+          const stats = player.getStats();
+          const variantTrack = player.getVariantTracks().find(track => track.active);
+          
+          // Directly retrieve and log all possible metrics for debugging
+          // We'll log everything first to see what's available
+          const allStats = {
+            playerStats: stats,
+            variantTracks: player.getVariantTracks(),
+            activeTrack: variantTrack,
+            videoProps: {
+              duration: videoElement.duration,
+              currentTime: videoElement.currentTime,
+              readyState: videoElement.readyState,
+              paused: videoElement.paused,
+              buffered: videoElement.buffered.length ? 
+                        [...Array(videoElement.buffered.length)].map((_, i) => 
+                          ({start: videoElement.buffered.start(i), end: videoElement.buffered.end(i)})) : []
+            }
+          };
+          
+          // Log all available stats for debugging
+          Logger.debug('All player stats for debugging:', JSON.stringify(allStats, null, 2));
+          
+          // Use a fallback approach for metrics - try multiple sources
+          
+          // Bitrate - try to find from any available source
+          if (variantTrack && variantTrack.bandwidth && variantTrack.bandwidth > 0) {
+            cmcdData.br = Math.round(variantTrack.bandwidth / 1000);
+          } else if (stats.streamBandwidth && stats.streamBandwidth > 0) {
+            cmcdData.br = Math.round(stats.streamBandwidth / 1000);
+          } else if (stats.estimatedBandwidth && stats.estimatedBandwidth > 0) {
+            // Last resort - use estimated as bitrate
+            cmcdData.br = Math.round(stats.estimatedBandwidth / 1000);
+          }
+          // No else - we don't want to make up data when none exists
+          
+          // Buffer length - calculate from buffered ranges if available
+          if (videoElement.buffered && videoElement.buffered.length > 0) {
+            const bufferEnd = videoElement.buffered.end(videoElement.buffered.length - 1);
+            const bufferLength = Math.round((bufferEnd - videoElement.currentTime) * 1000);
+            // Only include if it's non-negative
+            if (bufferLength >= 0) {
+              cmcdData.bl = bufferLength;
+            }
+          }
+          
+          // Duration - only include if we have segment info or can derive it
+          // For now, we don't have a reliable way to get this, so we'll leave it out
+          // CMCD duration usually refers to segment duration, not video duration
+          
+          // Measured throughput - try to find from available stats
+          if (stats.estimatedBandwidth && stats.estimatedBandwidth > 0) {
+            cmcdData.mtp = Math.round(stats.estimatedBandwidth / 1000);
+          } else if (stats.bandwidthEstimate && stats.bandwidthEstimate > 0) {
+            cmcdData.mtp = Math.round(stats.bandwidthEstimate / 1000);
+          }
+          // No else - we don't want to make up data when none exists
+          
+          // Buffer starvation flag - only true when actually buffering
+          cmcdData.bs = playerState === 'buffering';
+          
+          // Stream format and type
+          cmcdData.sf = 'h'; // HLS
+          cmcdData.st = 'v'; // VOD
+          
+          // Resolution - only if variant track has dimensions
+          if (variantTrack && variantTrack.width && variantTrack.height) {
+            cmcdData.resolution = `${variantTrack.width}x${variantTrack.height}`;
+          }
+          
+          // Add playback rate (0 when paused)
+          cmcdData.pr = videoElement.paused ? 0 : videoElement.playbackRate;
+        }
+      }
+      
+      // Log all metrics values for debugging
+      Logger.debug(`CMCD metrics: br=${cmcdData.br}, bl=${cmcdData.bl}, d=${cmcdData.d}, mtp=${cmcdData.mtp}, playerState=${playerState}`);
+      
+      // Always send CMCD data when the player is active
+      // In a real production environment, you might want to add back some filters, but for debugging purposes
+      // we'll send all data to ensure our fixes didn't break anything
+      if (true) { // Always proceed with sending
+        // Send to server
+        Logger.debug('Sending CMCD data:', cmcdData);
+        fetch('/api/logs', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(cmcdData)
+        })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`HTTP error ${response.status}`);
+          }
+          return response.json();
+        })
+        .then(data => {
+          Logger.debug('CMCD data sent successfully:', data);
+        })
+        .catch(error => {
+          Logger.error('Error sending CMCD data:', error);
+        });
+      } else {
+        Logger.debug('Skipping CMCD data send - no meaningful metrics available');
+      }
     }
     
     // Load a video URL
@@ -382,15 +731,45 @@
         await player.load(url);
         
         playerStats.innerHTML = 'Ready to play';
-        console.log('Video loaded successfully');
+        Logger.info('Video loaded successfully');
       } catch (error) {
-        console.error('Error loading video:', error);
+        Logger.error('Error loading video:', error);
         playerStats.innerHTML = `<div class="text-danger">Error loading video: ${error.message}</div>`;
       }
     }
     
     // Initialize the player when the DOM is ready
-    document.addEventListener('DOMContentLoaded', initPlayer);
+    document.addEventListener('DOMContentLoaded', () => {
+      // Set initial log level from dropdown
+      const initialLevel = parseInt(logLevelSelect.value, 10);
+      Logger.setLevel(initialLevel);
+      console.log(`Initial log level set to ${initialLevel} from dropdown`);
+      
+      // Send initial session registration before the player is even initialized
+      const initialData = {
+        timestamp: new Date().toISOString(),
+        sid: sessionId,
+        playerState: 'page_loaded',
+        cid: 'video-stream-1'
+      };
+      
+      Logger.debug('Sending initial session registration:', initialData);
+      fetch('/api/logs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(initialData)
+      })
+      .then(() => {
+        Logger.info('Initial session registered successfully');
+        initPlayer();
+      })
+      .catch(error => {
+        Logger.error('Error registering initial session:', error);
+        initPlayer();
+      });
+    });
     
     // Load URL button handler
     loadUrlButton.addEventListener('click', () => {
@@ -403,6 +782,22 @@
     // Toggle CMCD on/off
     cmcdEnabledCheckbox.addEventListener('change', () => {
       player.configure('cmcd.enabled', cmcdEnabledCheckbox.checked);
+    });
+    
+    // Set logging level - with debugging to verify it's working
+    logLevelSelect.addEventListener('change', () => {
+      const level = parseInt(logLevelSelect.value, 10);
+      // Use direct console.log to ensure we see this regardless of Logger state
+      console.log(`Setting log level to ${level}`);
+      Logger.setLevel(level);
+      
+      // Test each log level to confirm changes
+      console.log("Testing Logger - you should only see messages at or below your selected level:");
+      Logger.error("Error message - should always be visible");
+      Logger.warn("Warning message - visible at level 1+");
+      Logger.info("Info message - visible at level 2+");
+      Logger.debug("Debug message - visible at level 3+");
+      Logger.trace("Trace message - visible at level 4 only");
     });
     
     // Statistics
@@ -438,6 +833,26 @@
       monitoringStatus.textContent = 'Connecting...';
       monitoringStatus.classList.remove('bg-success', 'bg-danger');
       monitoringStatus.classList.add('bg-warning');
+    });
+    
+    // Listen for active sessions events
+    socket.on('activeSessions', (sessions) => {
+      if (sessions && sessions.length > 0) {
+        Logger.debug('Active sessions received:', sessions);
+        
+        // Update tracked sessions
+        sessions.forEach(sessionId => {
+          if (sessionId && !trackedSessions.has(sessionId)) {
+            trackedSessions.add(sessionId);
+          }
+        });
+        
+        // Update the active sessions count
+        stats.activeSessions = trackedSessions.size;
+        
+        // Update UI
+        updateStatsDisplay();
+      }
     });
     
     socket.on('anomalies', (newAnomalies) => {
@@ -556,37 +971,220 @@
       
       // Update severity bars
       const total = Object.values(stats.bySeverity).reduce((sum, val) => sum + val, 0);
-      if (total > 0) {
-        const updateBar = (element, severity) => {
-          const count = stats.bySeverity[severity];
+      
+      // Create a function to update or reset a progress bar
+      const updateBar = (element, severity) => {
+        const count = stats.bySeverity[severity];
+        if (total > 0) {
+          // Calculate percentage when we have anomalies
           const percent = Math.round((count / total) * 100);
           element.style.width = `${percent || 0}%`;
           element.setAttribute('aria-valuenow', percent);
           element.textContent = `${severity.charAt(0).toUpperCase() + severity.slice(1)}: ${count}`;
-        };
-        
-        updateBar(severityLow, 'low');
-        updateBar(severityMedium, 'medium');
-        updateBar(severityHigh, 'high');
-        updateBar(severityCritical, 'critical');
-      }
+        } else {
+          // Reset to zero when no anomalies
+          element.style.width = "0%";
+          element.setAttribute('aria-valuenow', 0);
+          element.textContent = `${severity.charAt(0).toUpperCase() + severity.slice(1)}: 0`;
+        }
+      };
+      
+      // Always update all bars (even when total is 0)
+      updateBar(severityLow, 'low');
+      updateBar(severityMedium, 'medium');
+      updateBar(severityHigh, 'high');
+      updateBar(severityCritical, 'critical');
     }
     
-    // Generate test data
+    // Generate test data - with debounce to prevent multiple calls
+    let testDataGenerationLock = false;
     generateTestBtn.addEventListener('click', () => {
-      fetch('/api/test/generate', { method: 'POST' })
-        .then(response => response.json())
-        .then(data => {
-          console.log('Generated test data:', data);
+      // Prevent multiple rapid clicks
+      if (testDataGenerationLock) {
+        Logger.warn('Test data generation already in progress, please wait');
+        return;
+      }
+      
+      // Disable the button and set lock
+      testDataGenerationLock = true;
+      generateTestBtn.disabled = true;
+      generateTestBtn.textContent = 'Generating...';
+      
+      // Single run of test data generation
+      fetch('/api/test/generate', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          count: 10, // Limited count
+          oneTimeOnly: true // Signal this is a one-time generation
         })
-        .catch(error => console.error('Error generating test data:', error));
+      })
+      .then(response => response.json())
+      .then(data => {
+        Logger.info('Generated test data:', data);
+        // Re-enable the button after short delay
+        setTimeout(() => {
+          generateTestBtn.disabled = false;
+          generateTestBtn.textContent = 'Generate Test Data';
+          testDataGenerationLock = false;
+        }, 3000); // Prevent clicking again for 3 seconds
+      })
+      .catch(error => {
+        Logger.error('Error generating test data:', error);
+        // Re-enable on error too
+        generateTestBtn.disabled = false;
+        generateTestBtn.textContent = 'Generate Test Data';
+        testDataGenerationLock = false;
+      });
     });
     
-    // Clear anomalies
+    // Completely new implementation of Simulate Quality Drop
+    // Using direct API calls instead of the player's sendCMCDData
+    simulateQualityDropBtn.addEventListener('click', () => {
+      // Prevent multiple clicks
+      if (simulateQualityDropBtn.disabled) {
+        return;
+      }
+      
+      // Disable button during simulation
+      simulateQualityDropBtn.disabled = true;
+      simulateQualityDropBtn.textContent = 'Simulating...';
+      
+      Logger.info('Starting direct API-based quality drop simulation');
+      
+      // Create data points for simulation
+      const dataPoints = [
+        // High quality
+        { 
+          timestamp: new Date().toISOString(),
+          sid: sessionId,
+          cid: 'video-stream-1',
+          playerState: 'playing',
+          br: 6000, 
+          mtp: 8000,
+          bl: 5000,
+          pr: 1,
+          d: 4000,
+          isSimulation: true
+        },
+        // Quality drop
+        { 
+          timestamp: new Date().toISOString(),
+          sid: sessionId,
+          cid: 'video-stream-1',
+          playerState: 'playing',
+          br: 1500, 
+          mtp: 1600,
+          bl: 2000,
+          pr: 1,
+          d: 4000,
+          isSimulation: true
+        },
+        // Further drop
+        { 
+          timestamp: new Date().toISOString(),
+          sid: sessionId,
+          cid: 'video-stream-1',
+          playerState: 'playing',
+          br: 500, 
+          mtp: 700,
+          bl: 500,
+          pr: 1,
+          d: 4000,
+          isSimulation: true,
+          forceDetection: true
+        }
+      ];
+      
+      // Function to send one data point
+      const sendPoint = (point, index) => {
+        return new Promise((resolve, reject) => {
+          Logger.debug(`Sending simulation data point ${index + 1}:`, point);
+          
+          fetch('/api/logs', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(point)
+          })
+          .then(response => response.json())
+          .then(data => {
+            Logger.debug(`Data point ${index + 1} sent successfully:`, data);
+            resolve(data);
+          })
+          .catch(err => {
+            Logger.error(`Error sending data point ${index + 1}:`, err);
+            reject(err);
+          });
+        });
+      };
+      
+      // Send points sequentially with delays
+      sendPoint(dataPoints[0], 0)
+        .then(() => new Promise(resolve => setTimeout(() => resolve(), 1000)))
+        .then(() => sendPoint(dataPoints[1], 1))
+        .then(() => new Promise(resolve => setTimeout(() => resolve(), 1000)))
+        .then(() => sendPoint(dataPoints[2], 2))
+        .then(() => {
+          Logger.info('All simulation data points sent successfully');
+          // Re-enable button
+          setTimeout(() => {
+            simulateQualityDropBtn.disabled = false;
+            simulateQualityDropBtn.textContent = 'Simulate Quality Drop';
+          }, 1000);
+        })
+        .catch(error => {
+          Logger.error('Error in simulation sequence:', error);
+          simulateQualityDropBtn.disabled = false;
+          simulateQualityDropBtn.textContent = 'Simulate Quality Drop';
+        });
+    });
+    
+    // Force anomaly detection
+    forceAnomalyBtn.addEventListener('click', () => {
+      Logger.info('Forcing anomaly detection');
+      
+      // Direct API call instead of using sendCMCDData
+      fetch('/api/logs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          timestamp: new Date().toISOString(),
+          sid: sessionId,
+          cid: 'video-stream-1',
+          playerState: 'playing',
+          forceDetection: true,
+          isSimulation: true,
+          br: 5000, 
+          mtp: 6000,
+          bl: 4000,
+          pr: 1,
+          d: 4000
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        Logger.debug('Forced anomaly API response:', data);
+      })
+      .catch(err => {
+        Logger.error('Error forcing anomaly:', err);
+      });
+    });
+    
+    // Clear anomalies and reset stats
     clearAnomaliesBtn.addEventListener('click', () => {
+      // Clear all anomalies
       anomalies.clear();
+      
+      // Clear tracked sessions
+      trackedSessions.clear();
+      
+      // Reset all stats
       stats = {
-        activeSessions: stats.activeSessions,
+        activeSessions: 0, // Reset active sessions to 0
         totalAnomalies: 0,
         byType: {},
         bySeverity: {
@@ -596,6 +1194,8 @@
           critical: 0
         }
       };
+      
+      // Update UI
       updateAnomaliesDisplay();
       updateStatsDisplay();
     });

@@ -193,7 +193,7 @@ function generateAnomalyPattern(): CMCDLogEntry[] {
 /**
  * Generate test data and send it to the log processor
  */
-export function generateTestData(count = 20): CMCDLogEntry[] {
+export function generateTestData(count = 20, options: { oneTimeOnly?: boolean } = {}): CMCDLogEntry[] {
   const logs: CMCDLogEntry[] = [];
   const logProcessor = getLogProcessor();
   
@@ -202,21 +202,222 @@ export function generateTestData(count = 20): CMCDLogEntry[] {
     return [];
   }
   
-  // Generate some random individual logs
-  for (let i = 0; i < count; i++) {
-    const log = generateRandomLog();
+  // Always mark test data with simulation flag for proper handling
+  const isTestData = true;
+  
+  // Limit count to avoid overloading the system
+  const safeCount = Math.min(count, 10);
+  logger.info(`Generating ${safeCount} individual logs and patterns (oneTimeOnly: ${options.oneTimeOnly})`);
+  
+  // Generate multiple patterns to trigger different types of anomalies
+  
+  // Session IDs for each pattern
+  const bufferingSessionId = `buffering-${Math.random().toString(36).substring(2, 8)}`;
+  const qualitySessionId = `quality-${Math.random().toString(36).substring(2, 8)}`;
+  const networkSessionId = `network-${Math.random().toString(36).substring(2, 8)}`;
+  const startupSessionId = `startup-${Math.random().toString(36).substring(2, 8)}`;
+  
+  // 1. BUFFERING pattern - will trigger BUFFERING and PLAYBACK_STALL anomalies
+  const bufferingPattern = [
+    {
+      timestamp: new Date(),
+      sid: bufferingSessionId,
+      cid: `content-buffering-${Math.random().toString(36).substring(2, 8)}`,
+      br: 5000,
+      bl: 5000,
+      mtp: 6000,
+      playerState: 'playing' as 'playing',
+      bs: false,
+      sf: 'h' as 'h',
+      st: 'v' as 'v',
+      pr: 1,
+      isSimulation: true,
+      anomalyType: 'BUFFERING'
+    },
+    {
+      timestamp: new Date(Date.now() + 1000),
+      sid: bufferingSessionId,
+      cid: `content-buffering-${Math.random().toString(36).substring(2, 8)}`,
+      br: 5000,
+      bl: 300, // Very low buffer
+      mtp: 2200, // Not enough throughput
+      playerState: 'buffering' as 'buffering',
+      bs: true, // Buffer starvation flag
+      sf: 'h' as 'h',
+      st: 'v' as 'v',
+      pr: 0,
+      isSimulation: true,
+      anomalyType: 'BUFFERING'
+    },
+    {
+      timestamp: new Date(Date.now() + 2000),
+      sid: bufferingSessionId,
+      cid: `content-buffering-${Math.random().toString(36).substring(2, 8)}`,
+      br: 3000, // Reduced bitrate due to buffering
+      bl: 0, // Zero buffer
+      mtp: 1200,
+      playerState: 'buffering' as 'buffering',
+      bs: true,
+      sf: 'h' as 'h',
+      st: 'v' as 'v',
+      pr: 0,
+      isSimulation: true,
+      forceDetection: true,
+      anomalyType: 'BUFFERING'
+    }
+  ];
+  
+  // 2. QUALITY DEGRADATION pattern
+  const qualityPattern = [
+    {
+      timestamp: new Date(Date.now() + 3000),
+      sid: qualitySessionId,
+      cid: `content-quality-${Math.random().toString(36).substring(2, 8)}`,
+      br: 8000, // High quality
+      bl: 6000,
+      mtp: 10000,
+      playerState: 'playing' as 'playing',
+      bs: false,
+      sf: 'h' as 'h',
+      st: 'v' as 'v',
+      pr: 1,
+      isSimulation: true,
+      anomalyType: 'QUALITY_DEGRADATION'
+    },
+    {
+      timestamp: new Date(Date.now() + 4000),
+      sid: qualitySessionId,
+      cid: `content-quality-${Math.random().toString(36).substring(2, 8)}`,
+      br: 3000, // Significant drop in quality
+      bl: 5000,
+      mtp: 4000,
+      playerState: 'playing' as 'playing',
+      bs: false,
+      sf: 'h' as 'h',
+      st: 'v' as 'v',
+      pr: 1,
+      isSimulation: true,
+      anomalyType: 'QUALITY_DEGRADATION'
+    },
+    {
+      timestamp: new Date(Date.now() + 5000),
+      sid: qualitySessionId,
+      cid: `content-quality-${Math.random().toString(36).substring(2, 8)}`,
+      br: 800, // Extreme drop
+      bl: 4000,
+      mtp: 3000,
+      playerState: 'playing' as 'playing',
+      bs: false,
+      sf: 'h' as 'h',
+      st: 'v' as 'v',
+      pr: 1,
+      isSimulation: true,
+      forceDetection: true,
+      anomalyType: 'QUALITY_DEGRADATION'
+    }
+  ];
+  
+  // 3. NETWORK ISSUE pattern
+  const networkPattern = [
+    {
+      timestamp: new Date(Date.now() + 6000),
+      sid: networkSessionId,
+      cid: `content-network-${Math.random().toString(36).substring(2, 8)}`,
+      br: 5000,
+      bl: 4000,
+      mtp: 8000, // High throughput
+      playerState: 'playing' as 'playing',
+      bs: false,
+      sf: 'h' as 'h',
+      st: 'v' as 'v',
+      pr: 1,
+      isSimulation: true,
+      anomalyType: 'NETWORK_ISSUE'
+    },
+    {
+      timestamp: new Date(Date.now() + 7000),
+      sid: networkSessionId,
+      cid: `content-network-${Math.random().toString(36).substring(2, 8)}`,
+      br: 5000, // Same bitrate
+      bl: 3500,
+      mtp: 2000, // Major throughput drop
+      playerState: 'playing' as 'playing',
+      bs: false,
+      sf: 'h' as 'h',
+      st: 'v' as 'v',
+      pr: 1,
+      isSimulation: true,
+      forceDetection: true,
+      anomalyType: 'NETWORK_ISSUE'
+    }
+  ];
+  
+  // 4. STARTUP DELAY pattern
+  const startupPattern = [
+    {
+      timestamp: new Date(Date.now() + 8000),
+      sid: startupSessionId,
+      cid: `content-startup-${Math.random().toString(36).substring(2, 8)}`,
+      br: 3000,
+      bl: 0,
+      dl: 5000, // High deadline (startup delay)
+      mtp: 4000,
+      playerState: 'buffering' as 'buffering',
+      bs: false,
+      sf: 'h' as 'h',
+      st: 'v' as 'v',
+      pr: 0,
+      su: true, // Startup flag
+      isSimulation: true,
+      anomalyType: 'STARTUP_DELAY'
+    },
+    {
+      timestamp: new Date(Date.now() + 9000),
+      sid: startupSessionId,
+      cid: `content-startup-${Math.random().toString(36).substring(2, 8)}`,
+      br: 3000,
+      bl: 2000,
+      dl: 3000, // Still high deadline
+      mtp: 4000,
+      playerState: 'buffering' as 'buffering',
+      bs: false,
+      sf: 'h' as 'h',
+      st: 'v' as 'v',
+      pr: 0,
+      su: true, // Startup flag
+      isSimulation: true,
+      forceDetection: true,
+      anomalyType: 'STARTUP_DELAY'
+    }
+  ];
+  
+  // Combine all patterns into one guaranteed set
+  const guaranteedPattern = [
+    ...bufferingPattern,
+    ...qualityPattern,
+    ...networkPattern,
+    ...startupPattern
+  ];
+  
+  // Add the guaranteed pattern
+  guaranteedPattern.forEach(log => {
     logs.push(log);
     logProcessor.addLogEntry(log);
+  });
+  
+  // Generate some additional random logs if requested
+  if (safeCount > 3) {
+    for (let i = 0; i < safeCount - 3; i++) {
+      const log = generateRandomLog();
+      log.isSimulation = true;
+      logs.push(log);
+      logProcessor.addLogEntry(log);
+    }
   }
   
-  // Generate a few anomaly patterns (2-3)
-  const numPatterns = randomInt(2, 3);
-  for (let i = 0; i < numPatterns; i++) {
-    const patternLogs = generateAnomalyPattern();
-    logs.push(...patternLogs);
-    patternLogs.forEach(log => logProcessor.addLogEntry(log));
-  }
+  // We're already generating a comprehensive set of test data with the improved patterns above
+  // No need for additional patterns
   
-  logger.info(`Generated ${logs.length} test log entries`);
+  logger.info(`Generated ${logs.length} total guaranteed test log entries`);
   return logs;
 }

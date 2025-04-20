@@ -127,11 +127,16 @@ export function setupRoutes(app: express.Application): void {
   app.post('/api/test/generate', (req: Request, res: Response) => {
     try {
       const count = req.body.count || 20;
-      const logs = generateTestData(count);
+      const oneTimeOnly = req.body.oneTimeOnly === true;
+      
+      logger.info(`Generating test data (count: ${count}, oneTimeOnly: ${oneTimeOnly})`);
+      
+      const logs = generateTestData(count, { oneTimeOnly });
       
       res.status(200).json({
         status: 'ok',
         generated: logs.length,
+        oneTimeOnly: oneTimeOnly,
         message: `Generated ${logs.length} test log entries`
       });
     } catch (error) {
