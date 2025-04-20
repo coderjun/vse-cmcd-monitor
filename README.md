@@ -31,8 +31,8 @@ A real-time pattern and anomaly detection system for streaming media logs, parti
 
 1. Clone the repository
 ```bash
-git clone <repository-url>
-cd real-time-spike
+git clone https://github.com/coderjun/vse-cmcd-monitor.git
+cd vse-cmcd-monitor
 ```
 
 2. Install dependencies
@@ -101,8 +101,20 @@ The system can detect several types of anomalies:
 
 ## License
 
-[ISC License](LICENSE)
+[MIT License](LICENSE)
 
 ## Acknowledgements
 
 - CTA-5004 CMCD specification
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+Please see [CONTRIBUTORS.md](CONTRIBUTORS.md) for a list of contributors.

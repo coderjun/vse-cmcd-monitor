@@ -18,8 +18,8 @@
     "anomaly-detection",
     "real-time"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "Jun Heider",
+  "license": "MIT",
   "dependencies": {
     "dotenv": "^16.5.0",
     "express": "^4.18.2",
